@@ -7,6 +7,39 @@ class YandexAuth:
         self.adb = adb_manager
         self.current_password = None  # Текущий пароль (можно установить при авторизации)
 
+    def find_element_and_click(self, resource_id):
+        """Находит элемент по resource-id и выполняет клик."""
+        # Получаем информацию о элементе
+        ui_dump = self.adb.run_adb_command("shell uiautomator dump /sdcard/ui.xml")
+        if "UI hierchary dumped to" not in ui_dump:
+            logging.error("Не удалось получить UI-иерархию")
+            return False
+        
+        # Читаем файл с UI-иерархией
+        ui_xml = self.adb.run_adb_command("shell cat /sdcard/ui.xml")
+        
+        # Ищем элемент по resource-id
+        if f'resource-id="{resource_id}"' not in ui_xml:
+            logging.error(f"Элемент с resource-id={resource_id} не найден")
+            return False
+        
+        # Парсим координаты элемента
+        bounds_start = ui_xml.find(f'bounds="', ui_xml.find(f'resource-id="{resource_id}"'))
+        bounds_end = ui_xml.find('"', bounds_start + len('bounds="') + 1)
+        bounds = ui_xml[bounds_start + len('bounds="'):bounds_end]
+        
+        # Извлекаем координаты
+        x1, y1, x2, y2 = map(int, bounds.replace("][", ",").split(","))
+        center_x = (x1 + x2) // 2
+        center_y = (y1 + y2) // 2
+        
+        # Выполняем клик по центру элемента
+        self.adb.run_adb_command(f"shell input tap {center_x} {center_y}")
+        logging.info(f"Клик по элементу {resource_id} на координатах ({center_x}, {center_y})")
+        return True
+
+
+
     def login_to_browser(self, login, password, twofa_code=None):
         """Авторизация в Яндекс.Браузере с поддержкой 2FA."""
         # Запуск браузера

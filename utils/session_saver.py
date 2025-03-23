@@ -2,8 +2,7 @@
 import tarfile
 import time
 import logging
-
-
+import os
 
 def save_session(adb_manager, account_id):
     """Сохраняет только ключевые данные для восстановления сессии."""
@@ -28,6 +27,11 @@ def save_session(adb_manager, account_id):
         
         # Копируем архив на компьютер
         archive_name = f"data/sessions/session_{account_id}_{timestamp}.tar.gz"
+        
+        # Убедимся, что папка data/sessions существует
+        os.makedirs("data/sessions", exist_ok=True)
+        
+        # Выполняем команду pull
         adb_manager.run_adb_command(f"pull {temp_archive} {archive_name}")
         
         # Удаляем временный архив с устройства
@@ -38,3 +42,4 @@ def save_session(adb_manager, account_id):
     except Exception as e:
         logging.error(f"Ошибка сохранения сессии: {e}")
         return None
+    
