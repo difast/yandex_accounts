@@ -2,9 +2,10 @@ import os
 import logging
 import threading
 from scripts.adb_manager import ADBManager
-from scripts.yandex_auth import YandexAuth
 from utils.file_parser import parse_logpass
 from utils.session_saver import save_session
+from scripts.yandex_auth import YandexAuth
+
 
 
 # Настройка логирования
@@ -58,7 +59,7 @@ accounts = parse_logpass("data/LogPass.txt")
 # Запуск потоков
 threads = []
 for i, account in enumerate(accounts):
-    device_id = "реальный_ID_устройства"  # Замените на реальный ID устройства
+    device_id = "127.0.0.1:21503"  # Замените на реальный ID устройства
     thread = threading.Thread(target=process_account, args=(device_id, account))
     threads.append(thread)
     thread.start()

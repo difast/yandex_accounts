@@ -1,152 +1,217 @@
 import time
 import logging
-
+import random
+import secrets
 
 class YandexAuth:
     def __init__(self, adb_manager):
         self.adb = adb_manager
-        self.current_password = None  # Текущий пароль (можно установить при авторизации)
+        self.current_password = None
+        self.new_password = None
+        self.logger = logging.getLogger('YandexAuth')
 
-    def find_element_and_click(self, resource_id):
-        """Находит элемент по resource-id и выполняет клик."""
-        # Получаем информацию о элементе
-        ui_dump = self.adb.run_adb_command("shell uiautomator dump /sdcard/ui.xml")
-        if "UI hierchary dumped to" not in ui_dump:
-            logging.error("Не удалось получить UI-иерархию")
-            return False
-        
-        # Читаем файл с UI-иерархией
-        ui_xml = self.adb.run_adb_command("shell cat /sdcard/ui.xml")
-        
-        # Ищем элемент по resource-id
-        if f'resource-id="{resource_id}"' not in ui_xml:
-            logging.error(f"Элемент с resource-id={resource_id} не найден")
-            return False
-        
-        # Парсим координаты элемента
-        bounds_start = ui_xml.find(f'bounds="', ui_xml.find(f'resource-id="{resource_id}"'))
-        bounds_end = ui_xml.find('"', bounds_start + len('bounds="') + 1)
-        bounds = ui_xml[bounds_start + len('bounds="'):bounds_end]
-        
-        # Извлекаем координаты
-        x1, y1, x2, y2 = map(int, bounds.replace("][", ",").split(","))
-        center_x = (x1 + x2) // 2
-        center_y = (y1 + y2) // 2
-        
-        # Выполняем клик по центру элемента
-        self.adb.run_adb_command(f"shell input tap {center_x} {center_y}")
-        logging.info(f"Клик по элементу {resource_id} на координатах ({center_x}, {center_y})")
-        return True
+    def _show_visual(self, message):
+        """Визуальное отображение действия на устройстве (без логирования)"""
+        try:
+            self.adb.run_adb_command(
+                f"shell am start -a android.intent.action.VIEW "
+                f"-d 'message://{message}'"
+            )
+            time.sleep(1)
+        except Exception:
+            pass
 
-
+    def _log_action(self, message):
+        """Только логирование без визуального отображения"""
+        self.logger.info(message)
 
     def login_to_browser(self, login, password, twofa_code=None):
-        """Авторизация в Яндекс.Браузере с поддержкой 2FA."""
-        # Запуск браузера
-        self.adb.run_adb_command("shell am start -n com.yandex.browser/.YandexBrowserActivity")
-        time.sleep(2)  # Ждем загрузки браузера
-        
-        # Ввод логина
-        self.adb.run_adb_command("shell input tap 300 500")  # Клик в поле логина
-        self.adb.run_adb_command(f"shell input text {login}")
-        self.adb.run_adb_command("shell input keyevent 66")  # Enter
-        
-        # Ввод пароля
-        self.adb.run_adb_command("shell input tap 300 600")  # Клик в поле пароля
-        self.adb.run_adb_command(f"shell input text {password}")
-        self.adb.run_adb_command("shell input keyevent 66")  # Enter
-        
-        # Ввод 2FA (если код передан)
-        if twofa_code:
-            self.adb.run_adb_command("shell input tap 300 700")  # Клик в поле 2FA
-            self.adb.run_adb_command(f"shell input text {twofa_code}")
-            self.adb.run_adb_command("shell input keyevent 66")  # Enter
-        
-        logging.info(f"Успешная авторизация для аккаунта {login}")
+        """Авторизация в браузере с визуальным контролем"""
+        try:
+            # 1. Открытие браузера
+            self._log_action("[1/5] Открытие Яндекс.Браузера")
+            self._show_visual("Открытие браузера")
+            self.adb.run_adb_command(
+                "shell am start -n com.yandex.browser/.YandexBrowserActivity"
+            )
+            time.sleep(3)
+
+            # 2. Ввод логина
+            self._log_action("[2/5] Ввод логина")
+            self._show_visual("Ввод логина")
+            self.adb.run_adb_command("shell input tap 300 500")
+            self.adb.run_adb_command(f"shell input text {login}")
+            self.adb.run_adb_command("shell input keyevent 66")
+            time.sleep(2)
+
+            # 3. Ввод пароля
+            self._log_action("[3/5] Ввод пароля")
+            self._show_visual("Ввод пароля")
+            self.adb.run_adb_command("shell input tap 300 600")
+            self.adb.run_adb_command(f"shell input text {password}")
+            self.adb.run_adb_command("shell input keyevent 66")
+            time.sleep(2)
+
+            # 4. 2FA при необходимости
+            if twofa_code:
+                self._log_action("[4/5] Ввод 2FA кода")
+                self._show_visual("Ввод 2FA")
+                self.adb.run_adb_command("shell input tap 300 700")
+                self.adb.run_adb_command(f"shell input text {twofa_code}")
+                self.adb.run_adb_command("shell input keyevent 66")
+                time.sleep(2)
+
+            self.current_password = password
+            self._log_action("[5/5] Авторизация успешно завершена")
+            return True
+
+        except Exception as e:
+            self._log_action(f"Ошибка авторизации: {str(e)}")
+            return False
 
     def change_password_via_app(self, new_password):
-        """Меняет пароль через приложение Яндекс."""
-        # Открываем приложение Яндекс
-        self.adb.run_adb_command("shell am start -n ru.yandex.searchplugin/.MainActivity")
-        time.sleep(2)  # Ждем загрузки приложения
-        
-        # Переход в настройки аккаунта
-        self.adb.run_adb_command("shell input tap 1000 100")  # Клик на аватар
-        time.sleep(1)
-        self.adb.run_adb_command("shell input tap 500 800")  # Клик на "Настройки"
-        time.sleep(1)
-        self.adb.run_adb_command("shell input tap 500 600")  # Клик на "Безопасность"
-        time.sleep(1)
-        self.adb.run_adb_command("shell input tap 500 700")  # Клик на "Смена пароля"
-        time.sleep(1)
-        
-        # Ввод старого пароля
-        self.adb.run_adb_command("shell input tap 300 500")  # Клик в поле старого пароля
-        self.adb.run_adb_command(f"shell input text {self.current_password}")  # Ввод старого пароля
-        self.adb.run_adb_command("shell input keyevent 66")  # Enter
-        
-        # Ввод нового пароля
-        self.adb.run_adb_command("shell input tap 300 600")  # Клик в поле нового пароля
-        self.adb.run_adb_command(f"shell input text {new_password}")  # Ввод нового пароля
-        self.adb.run_adb_command("shell input keyevent 66")  # Enter
-        
-        # Подтверждение смены пароля
-        self.adb.run_adb_command("shell input tap 300 700")  # Клик на кнопку "Сохранить"
-        logging.info("Пароль успешно изменен через приложение")
+        """Смена пароля с визуальным контролем"""
+        try:
+            self._log_action("[1/7] Открытие приложения Яндекс")
+            self._show_visual("Открытие приложения")
+            self.adb.run_adb_command(
+                "shell am start -n ru.yandex.searchplugin/.MainActivity"
+            )
+            time.sleep(3)
+
+            self._log_action("[2/7] Открытие меню")
+            self._show_visual("Открытие меню")
+            self.adb.run_adb_command("shell input tap 1000 100")
+            time.sleep(1)
+            
+            self._log_action("[3/7] Переход в настройки")
+            self._show_visual("Переход в настройки")
+            self.adb.run_adb_command("shell input tap 500 800")
+            time.sleep(1)
+            
+            self._log_action("[4/7] Выбор безопасности")
+            self._show_visual("Меню безопасности")
+            self.adb.run_adb_command("shell input tap 500 600")
+            time.sleep(1)
+            
+            self._log_action("[5/7] Инициация смены пароля")
+            self._show_visual("Смена пароля")
+            self.adb.run_adb_command("shell input tap 500 700")
+            time.sleep(2)
+
+            self._log_action("[6/7] Ввод паролей")
+            self._show_visual("Ввод старого пароля")
+            self.adb.run_adb_command("shell input tap 300 500")
+            self.adb.run_adb_command(f"shell input text {self.current_password}")
+            time.sleep(1)
+            
+            self._show_visual("Ввод нового пароля")
+            self.adb.run_adb_command("shell input tap 300 600")
+            self.adb.run_adb_command(f"shell input text {new_password}")
+            time.sleep(1)
+            
+            self._log_action("[7/7] Подтверждение смены пароля")
+            self._show_visual("Подтверждение")
+            self.adb.run_adb_command("shell input tap 300 700")
+            time.sleep(5)
+            
+            self._log_action(f"Пароль успешно изменен на: {new_password}")
+            return True
+
+        except Exception as e:
+            self._log_action(f"Ошибка смены пароля: {str(e)}")
+            return False
 
     def generate_backup_codes_via_app(self):
-        """Генерирует резервные коды через приложение Яндекс."""
-        # Открываем приложение Яндекс
-        self.adb.run_adb_command("shell am start -n ru.yandex.searchplugin/.MainActivity")
-        time.sleep(2)  # Ждем загрузки приложения
-        
-        # Переход в настройки аккаунта
-        self.adb.run_adb_command("shell input tap 1000 100")  # Клик на аватар
-        time.sleep(1)
-        self.adb.run_adb_command("shell input tap 500 800")  # Клик на "Настройки"
-        time.sleep(1)
-        self.adb.run_adb_command("shell input tap 500 600")  # Клик на "Безопасность"
-        time.sleep(1)
-        self.adb.run_adb_command("shell input tap 500 700")  # Клик на "Резервные коды"
-        time.sleep(1)
-        
-        # Генерация резервных кодов
-        self.adb.run_adb_command("shell input tap 300 500")  # Клик на "Создать резервные коды"
-        logging.info("Резервные коды созданы через приложение")
+        """Генерация резервных кодов"""
+        try:
+            self._log_action("[1/5] Открытие приложения")
+            self._show_visual("Открытие приложения")
+            self.adb.run_adb_command(
+                "shell am start -n ru.yandex.searchplugin/.MainActivity"
+            )
+            time.sleep(2)
+            
+            self._log_action("[2/5] Открытие меню")
+            self._show_visual("Открытие меню")
+            self.adb.run_adb_command("shell input tap 1000 100")
+            time.sleep(1)
+            
+            self._log_action("[3/5] Переход в настройки")
+            self._show_visual("Переход в настройки")
+            self.adb.run_adb_command("shell input tap 500 800")
+            time.sleep(1)
+            
+            self._log_action("[4/5] Выбор безопасности")
+            self._show_visual("Меню безопасности")
+            self.adb.run_adb_command("shell input tap 500 600")
+            time.sleep(1)
+            
+            self._log_action("[5/5] Генерация кодов")
+            self._show_visual("Генерация кодов")
+            self.adb.run_adb_command("shell input tap 500 400")
+            time.sleep(2)
+            
+            self._log_action("Резервные коды успешно созданы")
+            return True
+            
+        except Exception as e:
+            self._log_action(f"Ошибка генерации кодов: {str(e)}")
+            return False
 
     def login_to_taxi(self, login, password):
-        """Авторизация в Яндекс.Такси."""
-        # Запуск приложения Яндекс.Такси
-        self.adb.run_adb_command("shell am start -n ru.yandex.taxi/.MainActivity")
-        time.sleep(2)  # Ждем загрузки приложения
-        
-        # Клик на кнопку "Войти"
-        self.adb.run_adb_command("shell input tap 300 500")
-        
-        # Ввод логина и пароля
-        self.adb.run_adb_command("shell input tap 300 600")  # Клик в поле логина
-        self.adb.run_adb_command(f"shell input text {login}")
-        self.adb.run_adb_command("shell input keyevent 66")  # Enter
-        
-        self.adb.run_adb_command("shell input tap 300 700")  # Клик в поле пароля
-        self.adb.run_adb_command(f"shell input text {password}")
-        self.adb.run_adb_command("shell input keyevent 66")  # Enter
-        
-        logging.info("Успешная авторизация в Яндекс.Такси")
+        """Авторизация в Яндекс.Такси"""
+        try:
+            self._log_action("[1/5] Открытие приложения Такси")
+            self._show_visual("Открытие Такси")
+            self.adb.run_adb_command(
+                "shell am start -n ru.yandex.taxi/.MainActivity"
+            )
+            time.sleep(2)
+            
+            self._log_action("[2/5] Нажатие кнопки Войти")
+            self._show_visual("Нажатие Войти")
+            self.adb.run_adb_command("shell input tap 300 500")
+            time.sleep(1)
+            
+            self._log_action("[3/5] Ввод логина")
+            self._show_visual("Ввод логина")
+            self.adb.run_adb_command("shell input tap 300 600")
+            self.adb.run_adb_command(f"shell input text {login}")
+            time.sleep(1)
+            
+            self._log_action("[4/5] Ввод пароля")
+            self._show_visual("Ввод пароля")
+            self.adb.run_adb_command("shell input tap 300 700")
+            self.adb.run_adb_command(f"shell input text {password}")
+            time.sleep(1)
+            
+            self._log_action("[5/5] Подтверждение входа")
+            self._show_visual("Подтверждение")
+            self.adb.run_adb_command("shell input tap 300 800")
+            time.sleep(3)
+            
+            self._log_action("Успешная авторизация в Яндекс.Такси")
+            return True
+            
+        except Exception as e:
+            self._log_action(f"Ошибка авторизации в Такси: {str(e)}")
+            return False
 
     def simulate_activity(self):
-        """Имитирует активность пользователя."""
-        # Открытие случайной страницы
-        self.adb.run_adb_command("shell input keyevent 64")  # Открыть браузер
-        self.adb.run_adb_command("shell input text 'https://yandex.ru/news'")
-        self.adb.run_adb_command("shell input keyevent 66")  # Enter
-        
-        # Случайные клики
-        import random
-        for _ in range(5):
-            x = random.randint(100, 500)
-            y = random.randint(100, 1000)
-            self.adb.run_adb_command(f"shell input tap {x} {y}")
-            time.sleep(1)  # Пауза между кликами
-        
-        logging.info("Активность имитирована")
+        """Имитация активности пользователя"""
+        try:
+            self._log_action("Начало имитации активности")
+            for i in range(5):
+                x = random.randint(100, 900)
+                y = random.randint(100, 1800)
+                self._show_visual(f"Активность {i+1}/5")
+                self.adb.run_adb_command(f"shell input tap {x} {y}")
+                time.sleep(1)
+            
+            self._log_action("Имитация активности завершена")
+            return True
+            
+        except Exception as e:
+            self._log_action(f"Ошибка имитации активности: {str(e)}")
+            return False

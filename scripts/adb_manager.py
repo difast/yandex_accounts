@@ -53,7 +53,7 @@ class ADBManager:
 
 if __name__ == "__main__":
     # Пример использования
-    device_id = "реальный_ID_устройства"  # Замените на реальный ID !!! узнать ID:    adb devices (Bash)
+    device_id = "127.0.0.1:21503"  # Замените на реальный ID !!! узнать ID:    adb devices (Bash)
     adb = ADBManager(device_id)
     
     # Проверка подключения устройства
